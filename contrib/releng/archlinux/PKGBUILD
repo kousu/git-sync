@@ -1,0 +1,41 @@
+pkgname=git-sync
+pkgdesc='one-step git subcommmand to safely synchronize two copies of a folder'
+pkgver=1
+pkgrel=1
+url='https://github.com/kousu/git-sync'
+license=('MIT')
+arch=('any')
+source=('git+https://github.com/kousu/git-sync.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/${pkgname}"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+depends=(
+  git
+  bash
+)
+
+makedepends=(
+  go-md2man
+)
+
+optdepends=(
+  'systemd: for automatic folder watching'
+)
+
+build() {
+  cd "$pkgname"
+
+  make
+}
+
+package() {
+  cd "$pkgname"
+
+  PREFIX="$pkgdir"/usr make install install-contrib
+
+  install -Dm644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+}

@@ -1,0 +1,11 @@
+# ~/.config/systemd/user/git-sync@.timer
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=15min
+
+# add some jitter; prevent thundering-herd
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

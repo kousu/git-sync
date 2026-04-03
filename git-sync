@@ -1,0 +1,150 @@
+#!/bin/sh
+# git-sync
+#
+# A git subcommand which does a bidirectional _sync_ of the current on-disk state
+# (respecting .gitignore, of course). This means ALL changed/added/deleted files
+# are included and pushed. It's a hammer to spread files across multiple devices
+# -- like Dropbox or Syncthing -- not for when you need to carefully justify changes.
+#
+# TODO
+# - [ ] Test what happens if run during
+#   - rebase
+#   - merge conflict
+#   - cherry-picking
+#   - bisecting
+# - [ ] Test that it is, in fact, safe to `git sync` with an active conflict in place.
+# - [ ] Test bare repositories (it should .. fail.. because a bare repository is not a work tree)
+# - [ ] Consider: on merge conflicts, undo the auto-commit as well (`git reset --mixed "${UPSTREAM}"` ?)
+# - [ ] verify if set -x prints to stdout or stderr
+# - [ ] locking
+#   - git already has locking on push and pull, but it might be worth emulated what cherry-pick and rebase do, writing sentinel files to .git/ to mark that they are in-progress.
+#   - at least, we probably don't want multiple instances of *this* process to run.
+# - [ ] better argument parsing: don't allow --version, --reset, --able to be used together, etc
+
+VERSION=1.0.0
+
+set -e
+
+reset() {
+  if UPSTREAM=$(git rev-parse --abbrev-ref "@{upstream}" 2>&1); then
+    git reset --mixed "${UPSTREAM}"
+  else
+    echo "There is no upstream set." 2>&1
+    return 1
+  fi
+}
+
+syncable() {
+  if ! ( WORKTREE=$(git rev-parse --is-inside-work-tree 2>&1) && [ "$WORKTREE" = "true" ] ); then
+    # are we inside git?
+    # if not, the user isn't using git, so just ignore
+    return 1
+  fi
+
+  if ! REMOTES=$(git remote 2>&1) || [ -z "$REMOTES" ]; then
+
+    # pretty-print the path "$1" relative to $HOME, or if not possible use the absolute path
+    repo="$(realpath --relative-to="$HOME" --relative-base="$HOME" "$(pwd)")"
+    if [ "${repo#/}" = "$repo" ]; then
+      # if a subdirectory of home, anchor it to '~/' for the advice to the user
+      # shellcheck disable=SC2088
+      repo='~/'"$repo"
+    fi
+
+    echo "There is no remote server to sync to; you should consider adding one:"
+    printf "\tgit -C \"%s\" remote add origin your@remote:repo\n" "$repo"
+    return 1
+  fi
+
+  return 0
+}
+
+sync() {
+  if ! ( WORKTREE=$(git rev-parse --is-inside-work-tree 2>&1) && [ "$WORKTREE" = "true" ] ); then
+    echo "error: not a git work tree." >&2
+    return 1
+  fi
+
+  if ! REMOTES=$(git remote 2>&1) || [ -z "$REMOTES" ]; then
+    echo "error: no remote defined" >&2
+    return 1
+  fi
+
+  # TODO: check for rebase-in-progress and other unusual states?
+
+  ## sync process:
+  #
+  # The git commands are all `set -x` so their outputs are labelled in the log.
+
+  # 1. commit
+  (set -x; git stage -v --all) # NB: --all means stage deletions too, not just new and modified files
+  if ! git diff --staged --quiet; then
+    (set -x; git commit --allow-empty-message -m "")
+  fi
+
+  # 2. pull
+  if UPSTREAM=$(git rev-parse --abbrev-ref "@{upstream}" 2>&1); then
+    # only pull if there's an upstream branch set
+    #
+    # - an upstream may be local OR remote;
+    #   - `git config branch.autoSetupMerge always` causes local upstreams
+    #   - TODO: warn if the upstream is local?
+    # - an upstream will usually be *set* by the following git push if missing,
+    #   so this is only skipped on the *first* run.
+
+    # emulate `git pull` so that we can distinguish errors cases:
+    # - network/auth problems fail at fetch
+    # - merge conflicts fail at rebase/merge, and get undone so the repo isn't left mangled
+    (set -x; git fetch)
+    rebase=$(git config --bool "branch.$(git rev-parse --abbrev-ref HEAD).rebase" 2>/dev/null || git config --bool pull.rebase 2>/dev/null)
+    if [ "${rebase}" = "true" ]; then
+      # https://stackoverflow.com/questions/44953117/can-git-tell-me-if-a-rebase-will-conflict-without-actually-rebasing :
+      (set -x; git rebase) || (ORIG_RC=$?; (set -x; git rebase --abort) && exit $ORIG_RC);
+    else
+      (set -x; git merge --no-ff --no-edit) || (ORIG_RC=$?; (set -x; git merge --abort) && exit $ORIG_RC);
+    fi
+  fi
+
+  # 3. push
+  (set -x; git push)
+}
+
+usage() {
+  git --help sync
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--version)
+      echo git-sync "$VERSION"
+      exit 0
+      ;;
+    --able)
+      ABLE=1
+      exit $?
+      ;;
+    --reset)
+      RESET=1
+      exit $?
+      ;;
+    -*)
+      # unknown
+      echo "Unknown option '$1'" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      # no other arguments
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [ -n "$ABLE" ]; then
+  syncable
+elif [ -n "$RESET" ]; then
+  reset
+else
+  sync
+fi

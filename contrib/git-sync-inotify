@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+
+DEBOUNCE_TIME=$((5 * 60)) # 5 minutes
+DEBOUNCE_TIME=7
+
+usage() {
+  echo "$0 folder [folder2 folder3 ...]"
+}
+
+debounce() {
+  # debounce a single stream of events
+  # this means it takes events and only outputs the *first one* that happens
+  # TIMEOUT="${1:-60}"; shift
+  TIMEOUT="${DEBOUNCE_TIME}"
+
+  local event
+  while true; do
+    if read -t "$TIMEOUT" -r -d $'\0' new_event; then
+      : # got an event within the timeout so that means the state is still bouncing; reset the timer and try again
+      # printf "debouncing '%s'\n" "$new_event" >&2
+      event="$new_event"
+    elif [ $? -eq 142 ]; then
+      # timeout
+      if [ -n "$event" ]; then
+        # printf "emitting '%s'\n" "$event" >&2
+        printf "%s\0" "$event"
+        event=""
+      fi
+    else
+      # some other error
+      return 1
+    fi
+  done
+}
+
+watch() {
+  DIR="$1"; shift
+
+  if ! git -C "$DIR" sync --able; then
+    return 1
+  fi
+
+  trap '[ -n "$(jobs -p)" ] && kill $(jobs -p); wait' EXIT
+
+  inotifywait -r -m -e close_write,move,delete --format "%w%f%0" --exclude .git "$DIR" | \
+    debounce | \
+    while IFS= read -r -d $'\0' event; do
+      printf "Triggered by %s\n" "$event"
+      git -C "$DIR" sync
+      echo ------------------------------------------------
+    done
+
+}
+
+if [ "${#@}" -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+trap '[ -n "$(jobs -p)" ] && kill $(jobs -p); wait' EXIT
+
+for dir in "$@"; do
+  watch "$dir" &
+done
+
+wait

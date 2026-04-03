@@ -1,0 +1,18 @@
+# Install this to ~/.config/systemd/user/git-sync@.service
+# and enable it for each directory you want to keep synced with
+#
+#   systemctl --user enable --now git-sync@$(systemd-escape path/to/repo1)
+#
+# Install service-alert@.service alongside it to bubble sync errors up to your UI.
+
+[Unit]
+Description=Git Sync (%I)
+OnFailure=user-service-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=git -C %I sync
+ExecStart=sleep 60
+
+[Install]
+WantedBy=default.target

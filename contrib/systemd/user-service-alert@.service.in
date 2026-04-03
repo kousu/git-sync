@@ -1,0 +1,13 @@
+# Install this to ~/.config/systemd/user/service-alert@.service
+# to get errors from git-sync (or other services) in your notification tray.
+#
+# This is basically chrony, but a lot more complicated because systemd
+# wanted to be more complicated.
+
+[Unit]
+Description=Notify errors in %i
+
+[Service]
+Type=oneshot
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+ExecStart=$(PREFIX)/bin/service-alert.sh %i
