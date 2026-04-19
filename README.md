@@ -1,3 +1,6 @@
+> [!WARNING]
+> Migrated to https://codeberg.org/kousu/git-sync
+
 # git-sync
 
 A git subcommmand that makes the current on-disk state equal the remote state in one step.
